@@ -1,56 +1,62 @@
-import { useEffect, useState } from "react";
-import SockJS from "sockjs-client";
-import Stomp, { Client } from "stompjs";
+import {useEffect, useState} from "react";
+import Stomp, {Client} from "@stomp/stompjs";
 
-const SOCKET_URL = "http://localhost:8080/ws";
+const SOCKET_URL = "ws://localhost:8080/ws";
 
 interface SocketProps {
-  subscriptions: Record<string, (message: Stomp.Message) => void>;
-  onDisconnect?: () => void;
+    subscriptions: Record<string, (message: Stomp.Message) => void>;
+    onDisconnect?: () => void;
 }
 
-export const useSocket = ({ subscriptions, onDisconnect }: SocketProps) => {
-  const [stompClient, setStompClient] = useState<Client>();
-  const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [userId, setUserId] = useState<string>("");
+export const useSocket = ({subscriptions, onDisconnect}: SocketProps) => {
+    const [stompClient, setStompClient] = useState<Client>();
+    const [isConnected, setIsConnected] = useState<boolean>(false);
+    const [userId, setUserId] = useState<string>("");
 
-  useEffect(() => {
-    const socket = new SockJS(SOCKET_URL);
-    const client = Stomp.over(socket);
+    useEffect(() => {
+        const client = new Client({
+            brokerURL: SOCKET_URL,
+            onConnect: () => {
+                setIsConnected(true);
+                let username = "";
+                while (!username) {
+                    // @ts-expect-error
+                    // todo: needs better handling from the prompt
+                    // username = prompt("Enter username")?.trim ?? "";
+                    username = "rando1234"
+                }
 
-    client.connect(
-      {},
-      () => {
-        setIsConnected(true);
-        let username = "";
-        while (!username) {
-          username = prompt("Enter username")?.trim() ?? "";
-        }
-        setUserId(username);
-        client.send("/app/join", {}, JSON.stringify({ name: username }));
-        Object.entries(subscriptions).forEach(([topic, callback]) =>
-          client.subscribe(topic, callback)
-        );
-        client.subscribe("disconnect");
-      },
-      (err) => {
-        console.error(err);
-      }
-    );
+                setUserId(username);
 
-    setStompClient(client);
+                client.publish({
+                    destination: "/app/join",
+                    body: JSON.stringify({name: username})
+                });
 
-    return () => {
-      try {
-        client.disconnect(() => {
-          setIsConnected(false);
-          if (typeof onDisconnect !== "undefined") onDisconnect();
+                Object.entries(subscriptions)
+                    .forEach(
+                        ([topic, callback]) =>
+                            client.subscribe(topic, callback)
+                    );
+                client.subscribe("disconnect", () => console.log("disconnect"));
+            },
+            onDisconnect: () => {
+                setIsConnected(false);
+                if (typeof onDisconnect !== "undefined") onDisconnect();
+            }
         });
-      } catch (err) {
-        console.error(err);
-      }
-    };
-  }, []);
 
-  return { client: stompClient, userId, isConnected };
+        client.activate();
+
+        setStompClient(client);
+
+        return () => {
+            try {
+                client.forceDisconnect()
+            } catch (err) {
+                console.error(err)
+            }
+        };
+    }, []);
+    return {client: stompClient, userId, isConnected};
 };
